@@ -13,8 +13,7 @@ lat = opt2satDset3.site_latitude_deg(1);
 lon = opt2satDset3.site_longitude_deg(1);
 alt = opt2satDset3.site_altitude_m(1);
 lla_site = latlonalt_deg(lat, lon, alt);
-lla_site.epoch = opt2satDset3.datetime(1);
-R = eci(lla_site).position_m';
+
 
 idxs = [2   3   4
         6   8   10
@@ -25,9 +24,30 @@ idxs = [2   3   4
 
 setnum = 1;
 
-%az = opt2satDset3.azimuth_deg(idxs(setnum, 1));
-%el = opt2satDset3.elevation_deg(idxs(setnum, 1));
-%aer1 = azelrn_deg(az, el, 1)
+L = [];
+R = [];
+for obsnum = 1:3
+    i = idxs(setnum, obsnum);
+
+    % Get ECI vector to observation site
+    lla_site.epoch = opt2satDset3.datetime(i);
+    Rvec = eci(lla_site).position_m';
+    
+    % Get AER to satellite from observation site
+    az = opt2satDset3.azimuth_deg(i);
+    el = opt2satDset3.elevation_deg(i);
+    aerhat = azelrn_deg(az, el, 1);
+    
+    % Get rhohat
+    aerhat.epoch = opt2satDset3.datetime(i);
+    eci_dir = eci(aerhat, lla_site).position_m';
+    rhohat = eci_dir - Rvec;
+    
+    L(:, obsnum) = rhohat;
+    R(:, obsnum) = Rvec;
+end
+
+M = L\R;
 
 %% Functions
 
