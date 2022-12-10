@@ -2,10 +2,9 @@
 
 %% Setup
 
-clear all; clc
-load('opt2satDset3');
-load('opt3satDset3');
-
+clear; clc
+load('opt2satDset3.mat')
+load('opt3satDset3.mat')
 
 %% Initial Orbit Determination
 
@@ -73,7 +72,7 @@ for setnum = 1:height(idxs)
     C8 = 1;
     C6 = -(A^2 + 2*A*E + norm(R(:, 2))^2);
     C3 = -2*mu*B*(A + E);
-    C0 = -mu^2*B^2;;
+    C0 = -mu^2*B^2;
     p = [C8 0 C6 0 0 C3 0 0 C0];
     rts = roots(p);
     
@@ -103,6 +102,30 @@ for setnum = 1:height(idxs)
 end
 
 disp(rv)
+
+%% Estimation
+cols = ["right_ascension_deg", "declination_deg",...
+"site_latitude_deg", "site_longitude_deg", "site_altitude_m"];
+myobs = select_columns(opt2satDset3, cols, true);
+% Define a force model
+force_model = force_model(4, 4, 0, 0, 1, 1, 1000);
+% site location
+oapchile = make_station("OAP-Chile", lat, lon, alt);
+% Make a subset of the original data
+night1_early_25pts = myobs(1:4:100,:);
+
+% ***** TEMP VALUES *****
+% Time to use for initial estimate
+initial_est_epoch = opt2satDset3.datetime(4);
+% Initial estimate, currently based on the 4th entry of the estimates
+initial_est = pvt(initial_est_epoch, rv(1:3,4), rv(4:6,4));
+
+% find the orbit
+runnum = determine_orbit(initial_est, oapchile, night1_early_25pts, force_model);
+% propagate the orbit
+orbProp = propagate(initial_est,initial_est_epoch,initial_est_epoch+hours(1),10,force_model);
+% interpolate the propagated orbits to selected observation times
+ei = ephemeris_interp(orbProp,orbProp.epoch); % NOTE: used the same times as before, this is not what we want to do
 
 %% Functions
 
