@@ -114,7 +114,7 @@ disp(rv)
 N = [1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32].*31; %This is array of indicies that are being picked out from the second dataset
 
 
-%The following for loop is picking out the datetimes from the second data set and placing them in their own array
+%The following for loop is picking out the datetimes from the secoond data set and placing them in their own array
 
 for idx=1:width(N)
 
@@ -127,7 +127,7 @@ end
 %The following for loops are to propogated through each estimated state vector to find out the RMS for each state vector
 
 
-for k=1:18
+for k=1:9
 
     r=[rv(1,k);rv(2,k);rv(3,k)]; %position vector for a specific index
     v=[rv(4,k);rv(5,k);rv(6,k)]; %velocity vector for a specific index
@@ -137,35 +137,71 @@ for k=1:18
 
     for w=1:32
 
-        obs_azimuth(w,1)= opt3satDset3.azimuth_deg(N(w)); %observation azimuth array of each N index 
-        obs_elevation(w,1)=opt3satDset3.elevation_deg(N(w)); %observation elevation array of each N index
 
-        %insert force model in propogation when we figure out what it is
+        if opt3satDset3.azimuth_deg(N(w))>180
+
+        obs_azimuth(w,1)= opt3satDset3.azimuth_deg(N(w))-180; %observation azimuth array of each N index
+
+        else
+
+        obs_azimuth(w,1)= opt3satDset3.azimuth_deg(N(w));
+
+        end
+
+
+        if opt3satDset3.elevation_deg(N(w))>180
+
+        obs_elevation(w,1)=opt3satDset3.elevation_deg(N(w))-180; %observation elevation array of each N index
+
+        else
+
+        obs_elevation(w,1)=opt3satDset3.elevation_deg(N(w));
+
+        end
+
+        %insert force model in propogation when we Healy tells us what it is
 
         propogated_orbit=propagate(pvt_of_init_orbit,opt2satDset3.datetime(idxs(k)),hours(1),hours(1)); %Propogating initial orbit of the specific N index 
 
+       
         interp_state_eci=ephemeris_interp(propogated_orbit,datetimes_of_obs(w)); %interpolating initial orbit to the specified datetimes
 
         interp_state_aer=aer(interp_state_eci,lla_site); %turning the interpolated state to aer format
 
-        pred_azimuth(w,1)=interp_state_aer.azimuth_deg; %placing interpolated azimuth in the predicted azimuth array
 
-        pred_elevation(w,1)=interp_state_aer.elevation_deg; %placing interpolated elevation in the predicted elevation aray
- 
+  if interp_state_aer.azimuth_deg>180
+
+        pred_azimuth(w,1)=interp_state_aer.azimuth_deg-180; %placing interpolated azimuth in the predicted azimuth array
+
+  else
+
+        pred_azimuth(w,1)=interp_state_aer.azimuth_deg; 
+
+
+  end
+
+
+
+  if interp_state_aer.elevation_deg>180
+
+        pred_elevation(w,1)=interp_state_aer.elevation_deg-180; %placing interpolated elevation in the predicted elevation aray
+  else
+
+      pred_elevation(w,1)=interp_state_aer.elevation_deg;
+
+  end
 
     end
 
+RMS(k,1)=sqrt((1/width(N))*sum((obs_azimuth-pred_azimuth).^2+(obs_elevation-pred_elevation).^2)); %calculating the RMS
 
-
-RMS(k,1)=sqrt((1/width(N))*sum((obs_azimuth-pred_azimuth).^2+(obs_elevation-pred_elevation).^2));
 
 end
 
 
-RMS
+[value,index]=min(RMS); %finding the lowest RMS
 
-
-
+best_rv=rv(:,index); %setting the rv variable equal to the orbit with the lowest RMS
 
 
 
