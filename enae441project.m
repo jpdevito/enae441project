@@ -97,8 +97,14 @@ for setnum = 1:height(idxs)
     r3 = R(:, 3) + rho3*L(:, 3);
     
     [v1, v2, v3] = gibbs(r1, r2, r3, mu);
-
-    rv(:, end+1:end+3) = [r1 r2 r3 v1 v2 v3]';
+    
+    rv1 = [r1;v1];
+    rv2 = [r2;v2];
+    rv3 = [r3;v3];
+    
+    rv(:, end+1:end+3) = [rv1 rv2 rv3];
+     
+    % rv(:, end+1:end+3) = [r1 r2 r3 v1 v2 v3]';
 end
 
 disp(rv)
