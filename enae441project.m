@@ -15,10 +15,7 @@ alt = opt2satDset3.site_altitude_m(1);
 lla_site = latlonalt_deg(lat, lon, alt);
 
 idxs = [2   3   4
-        6   8   10
-        200 350 400
-        500 600 700
-        800 802 804
+        200 500 750
         840 841 842];
 
 rv = []; % to keep track of calculated orbits
