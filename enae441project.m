@@ -6,6 +6,16 @@ clear; clc
 load('opt2satDset3.mat')
 load('opt3satDset3.mat')
 
+% Observation data set (row indices)
+idxs = [
+        2   3   4
+        6   8   10
+        200 350 400
+        500 600 700
+        800 802 804
+        840 841 842
+];
+
 %% Initial Orbit Determination
 
 % Assuming observation site stays constant
@@ -13,10 +23,6 @@ lat = opt2satDset3.site_latitude_deg(1);
 lon = opt2satDset3.site_longitude_deg(1);
 alt = opt2satDset3.site_altitude_m(1);
 lla_site = latlonalt_deg(lat, lon, alt);
-
-idxs = [2   3   4
-        200 500 750
-        840 841 842];
 
 rv = []; % to keep track of calculated orbits
 for setnum = 1:height(idxs)
@@ -99,158 +105,172 @@ for setnum = 1:height(idxs)
     rv2 = [r2;v2];
     rv3 = [r3;v3];
     
-    rv(:, end+1:end+3) = [rv1 rv2 rv3];
-     
-    % rv(:, end+1:end+3) = [r1 r2 r3 v1 v2 v3]';
+    rv(:, end+1:end+3) = [r1 r2 r3; v1 v2 v3];
 end
-
-disp(rv)
-
-%% Deciding The Best Orbit
-
-N = [1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32].*31; %This is array of indicies that are being picked out from the second dataset
-
-
-%The following for loop is picking out the datetimes from the second data set and placing them in their own array
-
-for idx=1:width(N)
-
-    datetimes_of_obs(idx,1)=datetime_iso8601(opt3satDset3.datetime(N(idx))); %used the datetime_iso8601() function because of a time zone error
-
-end
-
-
-%The following for loops are to propogated through each estimated state vector to find out the RMS for each state vector
-
-
-for k=1:9
-
-    r=[rv(1,k);rv(2,k);rv(3,k)]; %position vector for a specific index
-    v=[rv(4,k);rv(5,k);rv(6,k)]; %velocity vector for a specific index
-
-    pvt_of_init_orbit=pvt(opt2satDset3.datetime(idxs(k)),r,v); %pvt of the initial orbit at estimation time
-
-    for w=1:32
+%% Deciding The Best Initial Estimate
+% Select rows from night 2
+night2obs_idxs = 1:4:100;
+% Force model for this section
+fm = force_model(4, 4, 0, 0, 1, 1, 1000);
+% Create 1d vector from idxs
+idxs_1d = idxs';
+idxs_1d = idxs_1d(:);
+RMS_list = [];
+for i = 1:length(idxs_1d)
+    rownum = idxs_1d(i);
     
-
-        if opt3satDset3.azimuth_deg(N(w))>180
-
-            obs_azimuth(w,1)= opt3satDset3.azimuth_deg(N(w))-180; %observation azimuth array of each N index
-
-        else
-
-            obs_azimuth(w,1)= opt3satDset3.azimuth_deg(N(w));
-
-        end
-
-
-        if opt3satDset3.elevation_deg(N(w))>180
-
-            obs_elevation(w,1)=opt3satDset3.elevation_deg(N(w))-180; %observation elevation array of each N index
-
-        else
-
-            obs_elevation(w,1)=opt3satDset3.elevation_deg(N(w));
-
-        end
-
-        %insert force model in propogation when we Healy tells us what it is
-
-        propogated_orbit=propagate(pvt_of_init_orbit,opt2satDset3.datetime(idxs(k)),hours(1),hours(1)); %Propogating initial orbit of the specific N index 
-
-       
-        interp_state_eci=ephemeris_interp(propogated_orbit,datetimes_of_obs(w)); %interpolating initial orbit to the specified datetimes
-
-        interp_state_aer=aer(interp_state_eci,lla_site); %turning the interpolated state to aer format
-
-
-  if interp_state_aer.azimuth_deg>180
-
-        pred_azimuth(w,1)=interp_state_aer.azimuth_deg-180; %placing interpolated azimuth in the predicted azimuth array
-
-  else
-
-        pred_azimuth(w,1)=interp_state_aer.azimuth_deg; 
-
-
-  end
-
-
-
-  if interp_state_aer.elevation_deg>180
-
-        pred_elevation(w,1)=interp_state_aer.elevation_deg-180; %placing interpolated elevation in the predicted elevation aray
-  else
-
-      pred_elevation(w,1)=interp_state_aer.elevation_deg;
-
-  end
-
+    % Initial estimate
+    initial_est_epoch = opt2satDset3.datetime(rownum);
+    initial_est = pvt(initial_est_epoch, rv(1:3,i), rv(4:6,i));
+    % Propagate the orbit, skip if orbit radius too small (likely because points for IOD too close together)
+    try
+        eph = propagate(initial_est, initial_est_epoch, initial_est_epoch+hours(36), minutes(30), fm);
+    catch exception
+        RMS_list(end+1) = NaN;
+        continue
     end
-
-RMS(k,1)=sqrt((1/width(N))*sum((obs_azimuth-pred_azimuth).^2+(obs_elevation-pred_elevation).^2)); %calculating the RMS
-
-
+    % Select rows from night 2
+    cols = ["right_ascension_deg", "declination_deg",...
+    "site_latitude_deg", "site_longitude_deg", "site_altitude_m"];
+    night2obs = select_columns(opt3satDset3, cols, true);
+    night2obs = night2obs(night2obs_idxs, :);
+    % Interpolate the propagated orbits to selected observation times
+    eph_night2est = ephemeris_interp(eph, datetime_iso8601(night2obs.datetime));
+    
+    % convert to aer
+    aer_day2est = aer(eph_night2est, lla_site);
+    % Calculate RMS
+    RMS_temp = 0;
+    N = height(night2obs);
+    for j = 1:N
+        az_pred = aer_day2est.azimuth_deg(j);
+        az = night2obs.azimuth_deg(j);
+        az_diff = min(abs(az_pred-az), 360-abs(az_pred-az));
+        el_pred = aer_day2est.elevation_deg(j);
+        el = night2obs.elevation_deg(j);
+        el_diff = min(abs(el_pred-el), 360-abs(el_pred-el));
+        RMS_temp = RMS_temp + az_diff^2 + el_diff^2;
+    end
+    RMS_list(end+1) = sqrt(RMS_temp / N);
 end
-
-
-[value,index]=min(RMS); %finding the lowest RMS
-
-best_rv=rv(:,index); %setting the rv variable equal to the orbit with the lowest RMS
-
-
-
-%% Estimation Setup
-
+% Get index of min RMS
+[~, i] = min(RMS_list);
+rv_best = rv(:, i)
+rownum_best = idxs_1d(i);
 % Time to use for initial estimate
-initial_est_epoch = opt2satDset3.datetime(index);
-% Initial estimate, currently based on the 4th entry of the estimates
-initial_est = pvt(initial_est_epoch, best_rv(1:3), best_rv(4:6));
+dt_best = opt2satDset3.datetime(rownum_best);
+%% Estimation Setup
 
 cols = ["right_ascension_deg", "declination_deg",...
 "site_latitude_deg", "site_longitude_deg", "site_altitude_m"];
-myobs = select_columns(opt2satDset3, cols, true);
+night1obs = select_columns(opt2satDset3, cols, true);
+night2obs = select_columns(opt3satDset3, cols, true);
 
 % site location
 oapchile = make_station("OAP-Chile", lat, lon, alt);
 
+% Initial estimate
+initial_est = pvt(dt_best, rv_best(1:3), rv_best(4:6));
+
 % Define a force model to use initially
-f_model = force_model(4, 4, 0, 0, 1, 1, 1000);
+fm = force_model(4, 4, 0, 0, 1, 1, 1000);
 
 %% Varying data points
 % Make subsets of the original data to test over
-sample1 = myobs(1:4:100,:);
-sample2 = myobs(371:4:470,:);
-sample3 = myobs(747:4:847,:);
-sample4 = myobs(1:16:800,:);
+night1samples = {};
+night1samples{1} = night1obs(1:4:100,:);
+night1samples{2} = night1obs(371:4:470,:);
+night1samples{3} = night1obs(747:4:847,:);
+night1samples{4} = night1obs(1:16:800,:);
+% Night 2 sample to use for RMS calculations
+night2sample = night2obs(1:4:100,:);
 
-% find the orbits
-runnum1 = determine_orbit(initial_est, oapchile, sample1, f_model);
-runnum2 = determine_orbit(initial_est, oapchile, sample2, f_model);
-runnum3 = determine_orbit(initial_est, oapchile, sample3, f_model);
-runnum4 = determine_orbit(initial_est, oapchile, sample4, f_model);
+RMS_list = [];
+sampling_est = initial_est;
+sampling_epoch = dt_best;
+for i = 1:length(night1samples)
+    % Find the orbit
+    out = determine_orbit(sampling_est, oapchile, night1samples{i}, fm);
+    %disp(out.details)
+    % Initial estimate
+    sampling_epoch = out.estimated.epoch;
+    sampling_est = pvt(sampling_epoch, out.estimated.position_m, out.estimated.velocity_ms);
+    % Propagate the orbit, skip if orbit radius too small (likely because points for IOD too close together)
+    try
+        eph = propagate(sampling_est, sampling_epoch, sampling_epoch+hours(36), minutes(30), fm);
+    catch exception
+        RMS_list(end+1) = NaN;
+        continue
+    end
+    % Interpolate the propagated orbits to selected observation times
+    eph_night2est = ephemeris_interp(eph, datetime_iso8601(night2sample.datetime));
+    
+    % convert to aer
+    aer_day2est = aer(eph_night2est, lla_site);
+    % Calculate RMS
+    RMS_temp = 0;
+    N = height(night2sample);
+    for j = 1:N
+        az_pred = aer_day2est.azimuth_deg(j);
+        az = night2obs.azimuth_deg(j);
+        az_diff = min(abs(az_pred-az), 360-abs(az_pred-az));
+        el_pred = aer_day2est.elevation_deg(j);
+        el = night2obs.elevation_deg(j);
+        el_diff = min(abs(el_pred-el), 360-abs(el_pred-el));
+        RMS_temp = RMS_temp + az_diff^2 + el_diff^2;
+    end
+    RMS_list(end+1) = sqrt(RMS_temp / N);
+end
+[~, i] = min(RMS_list);
+% sample to use in other tests
+best_sample = night1samples{i};
+%% Varying force model degree/order
 
-% compare with RMS
-
-% propagate the orbits *** DURATION TO USE? STEPSIZE?
-% orbProp_init = propagate(initial_est,initial_est_epoch,initial_est_epoch+hours(1),10,f_model);
-% interpolate the propagated orbits to selected observation times
-% interpolate_init = ephemeris_interp(orbProp_init,orbProp_init.epoch); % NOTE: used the same times as before, this is not what we want to do
-
-%% Varying force model
 % initial force models to determine which order/degree works best
-order_degree_force_models = [constants.force_twobody, force_model(2, 0, 0, 0, 1, 1, 1000), force_model(2, 2, 0, 0, 1, 1, 1000), force_model(20, 20, 0, 0, 1, 1, 1000)];
+OD_force_models = [constants.force_twobody, force_model(2, 0, 0, 0, 1, 1, 1000), force_model(2, 2, 0, 0, 1, 1, 1000), force_model(20, 20, 0, 0, 1, 1, 1000)];
+
+RMS_list = [];
+OD_fm_est = initial_est;
+OD_fm_epoch = dt_best;
+for k = 1:length(OD_force_models)
+    % find the orbit
+    orb = determine_orbit(OD_fm_est, oapchile, best_sample, OD_force_models(k));
+    % Initial estimate
+    OD_fm_epoch = out.estimated.epoch;
+    OD_fm_est = pvt(OD_fm_epoch, out.estimated.position_m, out.estimated.velocity_ms);
+    % Propagate the orbit, skip if orbit radius too small (likely because points for IOD too close together)
+    try
+        eph = propagate(OD_fm_est, OD_fm_epoch, OD_fm_epoch+hours(36), minutes(30), fm);
+    catch exception
+        RMS_list(end+1) = NaN;
+        continue
+    end
+    % Interpolate the propagated orbits to selected observation times
+    eph_night2est = ephemeris_interp(eph, datetime_iso8601(night2sample.datetime));
+    
+    % convert to aer
+    aer_day2est = aer(eph_night2est, lla_site);
+    % Calculate RMS
+    RMS_temp = 0;
+    N = height(night2sample);
+    for j = 1:N
+        az_pred = aer_day2est.azimuth_deg(j);
+        az = night2obs.azimuth_deg(j);
+        az_diff = min(abs(az_pred-az), 360-abs(az_pred-az));
+        el_pred = aer_day2est.elevation_deg(j);
+        el = night2obs.elevation_deg(j);
+        el_diff = min(abs(el_pred-el), 360-abs(el_pred-el));
+        RMS_temp = RMS_temp + az_diff^2 + el_diff^2;
+    end
+    RMS_list(end+1) = sqrt(RMS_temp / N);
+end
+[~, i] = min(RMS_list);
+% best force model
+best_fm = OD_force_models(i);
+%% Try force models based on other params
 
 % TODO - run for different luni-solar, then try 3 sets of solar radiatoin
 % pressure parameters
-
-
-% find the orbit
-runnum1 = determine_orbit(initial_est, oapchile, sample1, f_model);
-% propagate the orbit *** DURATION TO USE? STEPSIZE?
-orbProp1 = propagate(initial_est,initial_est_epoch,initial_est_epoch+hours(1),10,f_model);
-% interpolate the propagated orbits to selected observation times
-interpolated = ephemeris_interp(orbProp1,orbProp1.epoch); % NOTE: used the same times as before, this is not what we want to do
 
 %% Functions
 
