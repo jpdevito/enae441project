@@ -106,17 +106,16 @@ end
 
 disp(rv)
 
-%%Deciding The Best Orbit
+%% Deciding The Best Orbit
 
 N = [1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32].*31; %This is array of indicies that are being picked out from the second dataset
 
 
-%The following for loop is picking out the datetimes from the secoond data set and placing them in their own array
+%The following for loop is picking out the datetimes from the second data set and placing them in their own array
 
 for idx=1:width(N)
 
     datetimes_of_obs(idx,1)=datetime_iso8601(opt3satDset3.datetime(N(idx))); %used the datetime_iso8601() function because of a time zone error
-
 
 end
 
@@ -131,28 +130,27 @@ for k=1:9
 
     pvt_of_init_orbit=pvt(opt2satDset3.datetime(idxs(k)),r,v); %pvt of the initial orbit at estimation time
 
-
     for w=1:32
-
+    
 
         if opt3satDset3.azimuth_deg(N(w))>180
 
-        obs_azimuth(w,1)= opt3satDset3.azimuth_deg(N(w))-180; %observation azimuth array of each N index
+            obs_azimuth(w,1)= opt3satDset3.azimuth_deg(N(w))-180; %observation azimuth array of each N index
 
         else
 
-        obs_azimuth(w,1)= opt3satDset3.azimuth_deg(N(w));
+            obs_azimuth(w,1)= opt3satDset3.azimuth_deg(N(w));
 
         end
 
 
         if opt3satDset3.elevation_deg(N(w))>180
 
-        obs_elevation(w,1)=opt3satDset3.elevation_deg(N(w))-180; %observation elevation array of each N index
+            obs_elevation(w,1)=opt3satDset3.elevation_deg(N(w))-180; %observation elevation array of each N index
 
         else
 
-        obs_elevation(w,1)=opt3satDset3.elevation_deg(N(w));
+            obs_elevation(w,1)=opt3satDset3.elevation_deg(N(w));
 
         end
 
@@ -202,29 +200,57 @@ best_rv=rv(:,index); %setting the rv variable equal to the orbit with the lowest
 
 
 
-%% Estimation
+%% Estimation Setup
+
+% Time to use for initial estimate
+initial_est_epoch = opt2satDset3.datetime(index);
+% Initial estimate, currently based on the 4th entry of the estimates
+initial_est = pvt(initial_est_epoch, best_rv(1:3), best_rv(4:6));
+
 cols = ["right_ascension_deg", "declination_deg",...
 "site_latitude_deg", "site_longitude_deg", "site_altitude_m"];
 myobs = select_columns(opt2satDset3, cols, true);
-% Define a force model
-force_model = force_model(4, 4, 0, 0, 1, 1, 1000);
+
 % site location
 oapchile = make_station("OAP-Chile", lat, lon, alt);
-% Make a subset of the original data
-night1_early_25pts = myobs(1:4:100,:);
 
-% ***** TEMP VALUES *****
-% Time to use for initial estimate
-initial_est_epoch = opt2satDset3.datetime(4);
-% Initial estimate, currently based on the 4th entry of the estimates
-initial_est = pvt(initial_est_epoch, rv(1:3,4), rv(4:6,4));
+% Define a force model to use initially
+f_model = force_model(4, 4, 0, 0, 1, 1, 1000);
+
+%% Varying data points
+% Make subsets of the original data to test over
+sample1 = myobs(1:4:100,:);
+sample2 = myobs(371:4:470,:);
+sample3 = myobs(747:4:847,:);
+sample4 = myobs(1:16:800,:);
+
+% find the orbits
+runnum1 = determine_orbit(initial_est, oapchile, sample1, f_model);
+runnum2 = determine_orbit(initial_est, oapchile, sample2, f_model);
+runnum3 = determine_orbit(initial_est, oapchile, sample3, f_model);
+runnum4 = determine_orbit(initial_est, oapchile, sample4, f_model);
+
+% compare with RMS
+
+% propagate the orbits *** DURATION TO USE? STEPSIZE?
+% orbProp_init = propagate(initial_est,initial_est_epoch,initial_est_epoch+hours(1),10,f_model);
+% interpolate the propagated orbits to selected observation times
+% interpolate_init = ephemeris_interp(orbProp_init,orbProp_init.epoch); % NOTE: used the same times as before, this is not what we want to do
+
+%% Varying force model
+% initial force models to determine which order/degree works best
+order_degree_force_models = [constants.force_twobody, force_model(2, 0, 0, 0, 1, 1, 1000), force_model(2, 2, 0, 0, 1, 1, 1000), force_model(20, 20, 0, 0, 1, 1, 1000)];
+
+% TODO - run for different luni-solar, then try 3 sets of solar radiatoin
+% pressure parameters
+
 
 % find the orbit
-runnum = determine_orbit(initial_est, oapchile, night1_early_25pts, force_model);
-% propagate the orbit
-orbProp = propagate(initial_est,initial_est_epoch,initial_est_epoch+hours(1),10,force_model);
+runnum1 = determine_orbit(initial_est, oapchile, sample1, f_model);
+% propagate the orbit *** DURATION TO USE? STEPSIZE?
+orbProp1 = propagate(initial_est,initial_est_epoch,initial_est_epoch+hours(1),10,f_model);
 % interpolate the propagated orbits to selected observation times
-ei = ephemeris_interp(orbProp,orbProp.epoch); % NOTE: used the same times as before, this is not what we want to do
+interpolated = ephemeris_interp(orbProp1,orbProp1.epoch); % NOTE: used the same times as before, this is not what we want to do
 
 %% Functions
 
